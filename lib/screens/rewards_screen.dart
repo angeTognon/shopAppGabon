@@ -1,5 +1,9 @@
+import 'dart:async';
+import 'dart:convert';
 import 'package:flutter/material.dart';
+import 'package:http/http.dart' as http;
 import '../models/user_model.dart';
+import '../const.dart';
 
 class RewardsScreen extends StatefulWidget {
   final User user;
@@ -15,69 +19,139 @@ class _RewardsScreenState extends State<RewardsScreen> {
   String _selectedCategory = 'Tous';
   String _selectedStore = 'Toutes';
 
-  // Liste des boutiques disponibles (à adapter selon tes données réelles)
-  final List<String> _stores = [
-    'Toutes',
-    'Boutique Fashion',
-    'Café Paris',
-    'Tech Store',
-  ];
+  List<String> _stores = ['Toutes'];
+  List<String> _categories = ['Tous'];
+  List<Reward> _rewards = [];
+  bool _isLoading = true;
+  String? _error;
 
-  final List<String> _categories = [
-    'Tous',
-    'Shopping',
-    'Restaurant',
-    'Technologie',
-    'Divertissement'
-  ];
+  int _clientPoints = 0;
+  String _clientTier = '';
+  List<Map<String, dynamic>> _tiers = [];
+  Timer? _refreshTimer;
 
-  // Ajoute la propriété 'store' à chaque Reward
-  final List<Reward> _rewards = [
-    Reward(
-      id: 1,
-      title: 'Réduction 20%',
-      description: 'Sur votre prochain achat',
-      points: 500,
-      category: 'Shopping',
-      available: true,
-      iconName: 'shopping_bag',
-      color: '0xFF3B82F6',
-      store: 'Boutique Fashion',
-    ),
-    Reward(
-      id: 2,
-      title: 'Café gratuit',
-      description: 'Dans nos partenaires cafés',
-      points: 200,
-      category: 'Restaurant',
-      available: true,
-      iconName: 'local_cafe',
-      color: '0xFF8B4513',
-      store: 'Café Paris',
-    ),
-    Reward(
-      id: 3,
-      title: 'Écouteurs Bluetooth',
-      description: 'Écouteurs sans fil premium',
-      points: 2000,
-      category: 'Technologie',
-      available: true,
-      iconName: 'headphones',
-      color: '0xFF8B5CF6',
-      store: 'Tech Store',
-    ),
-    Reward(
-      id: 4,
-      title: 'Smartphone Premium',
-      description: 'Dernier modèle disponible',
-      points: 5000,
-      category: 'Technologie',
-      available: false,
-      iconName: 'smartphone',
-      color: '0xFF1F2937',
-      store: 'Tech Store',
-    ),
-  ];
+  // ...tes variables et méthodes...
+   @override
+  void initState() {
+    super.initState();
+    _fetchTiers();
+    _fetchRewards();
+    _refreshTimer = Timer.periodic(const Duration(seconds: 1), (timer) {
+      _fetchTiers();
+      _fetchRewards();
+    });
+  }
+
+@override
+void dispose() {
+  _refreshTimer?.cancel();
+  super.dispose();
+}
+  Future<void> _fetchTiers() async {
+    setState(() {
+      _isLoading = true;
+      _error = null;
+    });
+    try {
+      final response = await http.get(Uri.parse('$baseUrl/get_client_tiers.php?client_id=${widget.user.id}'));
+      final data = jsonDecode(response.body);
+      if (response.statusCode == 200 && data['success'] == true) {
+        final client = data['client'];
+        final tiers = List<Map<String, dynamic>>.from(data['tiers'] ?? []);
+        setState(() {
+          _clientPoints = int.tryParse(client['points'].toString()) ?? 0;
+          _clientTier = client['tier'] ?? '';
+          _tiers = tiers;
+          _isLoading = false;
+        });
+      } else {
+        setState(() {
+          _error = data['error'] ?? 'Erreur inconnue';
+          _isLoading = false;
+        });
+      }
+    } catch (e) {
+      print('ERROR: $e');
+      setState(() {
+        _error = e.toString();
+        _isLoading = false;
+      });
+    }
+  }
+
+  Future<void> _fetchRewards() async {
+    setState(() {
+      _isLoading = true;
+      _error = null;
+    });
+    try {
+      final rewards = await fetchRewards();
+      final stores = ['Toutes', ...{...rewards.map((r) => r.store)}];
+      final categories = ['Tous', ...{...rewards.map((r) => r.category)}];
+      setState(() {
+        _rewards = rewards;
+        _stores = stores;
+        _categories = categories;
+        _isLoading = false;
+      });
+    } catch (e) {
+      setState(() {
+        _error = e.toString();
+        _isLoading = false;
+      });
+    }
+  }
+
+  Future<List<Reward>> fetchRewards() async {
+    final response = await http.get(
+      Uri.parse('$baseUrl/rewarded_status_client.php?client_id=${widget.user.id}'),
+    );
+    final data = jsonDecode(response.body);
+    if (response.statusCode == 200 && data['success'] == true && data['rewards'] != null) {
+      return List<Map<String, dynamic>>.from(data['rewards'])
+          .map((json) => Reward.fromJson(json))
+          .toList();
+    } else {
+      return [];
+    }
+  }
+  Future<void> _updateRewardStatus(Reward reward, String status) async {
+    final response = await http.post(
+      Uri.parse('$baseUrl/update_reward_status.php'),
+      headers: {'Content-Type': 'application/json'},
+      body: jsonEncode({
+        'client_id': widget.user.id,
+        'merchant_id': reward.store, // ou adapte selon ta logique
+        'reward_label': reward.title,
+          'statut_by_client': status, // ou la valeur voulue
+
+      }),
+    );
+    if (response.statusCode == 200) {
+      _fetchRewards();
+    }
+
+  }
+
+Future<void> _updateRewardStatusByClient(Reward reward, String statutByClient) async {
+  final body = {
+    'client_id': widget.user.id,
+    'merchant_id': reward.merchantId,
+    'reward_label': reward.title,
+    'status': reward.rewardStatus,
+    'statut_by_client': statutByClient,
+  };
+  print('POST update_reward_status.php: $body');
+  final response = await http.post(
+    Uri.parse('$baseUrl/update_reward_status.php'),
+    headers: {'Content-Type': 'application/json'},
+    body: jsonEncode(body),
+  );
+  print('RESPONSE: ${response.body}');
+  if (response.statusCode == 200) {
+    _fetchRewards();
+  }
+}
 
   @override
   Widget build(BuildContext context) {
@@ -89,10 +163,23 @@ class _RewardsScreenState extends State<RewardsScreen> {
       return matchesSearch && matchesCategory && matchesStore;
     }).toList();
 
+    // if (_isLoading) {
+    //   return const Scaffold(
+    //     backgroundColor: Color(0xFFF8FAFC),
+    //     body: Center(child: CircularProgressIndicator()),
+    //   );
+    // }
+    // if (_error != null) {
+    //   return Scaffold(
+    //     backgroundColor: const Color(0xFFF8FAFC),
+    //     body: Center(child: Text('Erreur : $_error')),
+    //   );
+    // }
+
     return Scaffold(
       backgroundColor: const Color(0xFFF8FAFC),
       body: SafeArea(
-        child: Column(
+        child: Column(crossAxisAlignment: CrossAxisAlignment.start,
           children: [
             // Header
             Padding(
@@ -110,14 +197,15 @@ class _RewardsScreenState extends State<RewardsScreen> {
                     ),
                   ),
                   IconButton(
-                    onPressed: () {},
-                    icon: const Icon(Icons.filter_list, color: Color(0xFF3B82F6)),
+                    onPressed: () {
+                      _fetchTiers();
+                      _fetchRewards();
+                    },
+                    icon: const Icon(Icons.refresh, color: Color(0xFF3B82F6)),
                   ),
                 ],
               ),
             ),
-
-            // Search bar
             Padding(
               padding: const EdgeInsets.symmetric(horizontal: 20.0),
               child: Container(
@@ -155,327 +243,283 @@ class _RewardsScreenState extends State<RewardsScreen> {
                 ),
               ),
             ),
-            SizedBox(height: 15,),            
-            // Remplace le widget DropdownButton du filtre boutique par ce widget plus esthétique :
-            Padding(
-              padding: const EdgeInsets.symmetric(horizontal: 20.0, vertical: 8),
-              child: SizedBox(
-                height: 40,
-                child: ListView.separated(
-                  scrollDirection: Axis.horizontal,
-                  itemCount: _stores.length,
-                  separatorBuilder: (context, index) => const SizedBox(width: 10),
-                  itemBuilder: (context, index) {
-                    final store = _stores[index];
-                    final isSelected = _selectedStore == store;
-                    return GestureDetector(
-                      onTap: () {
-                        setState(() {
-                          _selectedStore = store;
-                        });
-                      },
-                      child: AnimatedContainer(
-                        duration: const Duration(milliseconds: 200),
-                        padding: const EdgeInsets.symmetric(horizontal: 18, vertical: 8),
+            // Palier/tier du client
+            const SizedBox(height: 15),
+            if (_tiers.isNotEmpty)
+              Padding(
+                padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 10),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    
+                    Text(
+                        'Statut de vos paliers de récompenses',
+                        style: const TextStyle(
+                          fontWeight: FontWeight.bold,
+                          fontSize: 15,
+                          fontFamily: "b",
+                          color: Color.fromARGB(255, 0, 0, 0),
+                        ),
+                        textAlign: TextAlign.center,
+                      ),
+                    const SizedBox(height: 14),
+                    ..._tiers.map((tier) {
+                       final int value = int.tryParse(tier['value'].toString()) ?? 0;
+  final bool reached = _clientPoints >= value;
+  final int maxReachedIndex = _tiers.lastIndexWhere((t) =>
+    _clientPoints >= (int.tryParse(t['value'].toString()) ?? 0)
+  );
+  final bool isCurrent = _tiers.indexOf(tier) == maxReachedIndex && maxReachedIndex != -1;
+
+                      return Container(
+                        margin: const EdgeInsets.only(bottom: 10),
                         decoration: BoxDecoration(
-                          color: isSelected ? const Color(0xFF3B82F6) : Colors.white,
-                          borderRadius: BorderRadius.circular(20),
+                          color: reached ? const Color(0xFF10B981).withOpacity(0.12) : Colors.white,
+                          borderRadius: BorderRadius.circular(14),
                           border: Border.all(
-                            color: isSelected ? const Color(0xFF3B82F6) : const Color(0xFFE5E7EB),
-                            width: 1.5,
+                            color: isCurrent
+                                ? const Color(0xFF3B82F6)
+                                : reached
+                                    ? const Color(0xFF10B981)
+                                    : const Color(0xFFE5E7EB),
+                            width: isCurrent ? 2.2 : 1.3,
                           ),
-                          boxShadow: isSelected
+                          boxShadow: isCurrent
                               ? [
                                   BoxShadow(
-                                    color: const Color(0xFF3B82F6).withOpacity(0.15),
-                                    blurRadius: 8,
+                                    color: const Color(0xFF3B82F6).withOpacity(0.08),
+                                    blurRadius: 10,
                                     offset: const Offset(0, 2),
                                   ),
                                 ]
                               : [],
                         ),
-                        child: Row(
-                          children: [
-                            Icon(
-                              store == 'Toutes'
-                                  ? Icons.store_mall_directory
-                                  : store == 'Boutique Fashion'
-                                      ? Icons.shopping_bag
-                                      : store == 'Café Paris'
-                                          ? Icons.local_cafe
-                                          : Icons.devices_other,
-                              size: 18,
-                              color: isSelected ? Colors.white : const Color(0xFF3B82F6),
+                        child: ListTile(
+                          leading: CircleAvatar(
+                            backgroundColor: reached
+                                ? const Color(0xFF10B981)
+                                : const Color(0xFFE5E7EB),
+                            child: Icon(
+                              reached ? Icons.emoji_events : Icons.lock_outline,
+                              color: reached ? Colors.white : const Color(0xFF9CA3AF),
                             ),
-                            const SizedBox(width: 7),
-                            Text(
-                              store,
-                              style: TextStyle(
-                                color: isSelected ? Colors.white : const Color(0xFF3B82F6),
-                                fontWeight: FontWeight.w600,
-                                fontFamily: "b",
-                                fontSize: 13,
-                              ),
-                            ),
-                          ],
-                        ),
-                      ),
-                    );
-                  },
-                ),
-              ),
-            ),
-            // ...existing code...
-
-            const SizedBox(height: 6),
-
-            // Categories
-            Container(
-              height: 40,
-              child: ListView.builder(
-                scrollDirection: Axis.horizontal,
-                padding: const EdgeInsets.symmetric(horizontal: 20),
-                itemCount: _categories.length,
-                itemBuilder: (context, index) {
-                  final category = _categories[index];
-                  final isSelected = _selectedCategory == category;
-
-                  return GestureDetector(
-                    onTap: () {
-                      setState(() {
-                        _selectedCategory = category;
-                      });
-                    },
-                    child: Container(
-                      margin: const EdgeInsets.only(right: 12,bottom: 5),
-                      padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 4),
-                      decoration: BoxDecoration(
-                        color: isSelected ? const Color(0xFF3B82F6) : Colors.white,
-                        borderRadius: BorderRadius.circular(20),
-                        boxShadow: [
-                          BoxShadow(
-                            color: Colors.black.withOpacity(0.1),
-                            blurRadius: 4,
-                            offset: const Offset(0, 2),
                           ),
-                        ],
-                      ),
-                      child: Center(
-                        child: Text(
-                          category,
-                          style: TextStyle(
-                            fontSize: 13,
-                            fontFamily: "r",
-                            fontWeight: FontWeight.w500,
-                            color: isSelected ? Colors.white : const Color(0xFF6B7280),
-                          ),
-                        ),
-                      ),
-                    ),
-                  );
-                },
-              ),
-            ),
-
-            const SizedBox(height: 20),
-
-            // Rewards list
-            Expanded(
-              child: ListView.builder(
-                padding: const EdgeInsets.symmetric(horizontal: 20),
-                itemCount: filteredRewards.length,
-                itemBuilder: (context, index) {
-                  final reward = filteredRewards[index];
-                  return _buildRewardCard(reward);
-                },
-              ),
-            ),
-          ],
-        ),
-      ),
-    );
-  }
-
-  Widget _buildRewardCard(Reward reward) {
-    final color = Color(int.parse(reward.color));
-    final canAfford = widget.user.points >= reward.points;
-
-    return Container(
-      margin: const EdgeInsets.only(bottom: 16),
-      padding: const EdgeInsets.all(16),
-      decoration: BoxDecoration(
-        color: Colors.white,
-        borderRadius: BorderRadius.circular(16),
-        boxShadow: [
-          BoxShadow(
-            color: Colors.black.withOpacity(0.1),
-            blurRadius: 8,
-            offset: const Offset(0, 2),
-          ),
-        ],
-      ),
-      child: Column(
-        children: [
-          Row(
-            children: [
-              Container(
-                width: 48,
-                height: 48,
-                decoration: BoxDecoration(
-                  color: color.withOpacity(0.2),
-                  borderRadius: BorderRadius.circular(12),
-                ),
-                child: Icon(
-                  _getIconData(reward.iconName),
-                  size: 24,
-                  color: color,
-                ),
-              ),
-              const SizedBox(width: 16),
-              Expanded(
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Text(
-                      reward.title,
-                      style: const TextStyle(
-                        fontSize: 15,
-                        fontFamily: "b",
-                        fontWeight: FontWeight.bold,
-                        color: Color(0xFF1F2937),
-                      ),
-                    ),
-                    const SizedBox(height: 4),
-                    Text(
-                      reward.description,
-                      style: const TextStyle(
-                        fontSize: 13,
-                        fontFamily: "r",
-                        color: Color(0xFF6B7280),
-                      ),
-                    ),
-                    const SizedBox(height: 2),
-                    Row(
-                      children: [
-                        const Icon(Icons.star, size: 16, color: Color(0xFFF59E0B)),
-                        const SizedBox(width: 4),
-                        Text(
-                          '${reward.points} points',
-                          style: const TextStyle(
-                            fontSize: 13,
-                            fontFamily: "b",
-                            fontWeight: FontWeight.w600,
-                            color: Color(0xFFF59E0B),
-                          ),
-                        ),
-                        if (!reward.available) ...[
-                          const SizedBox(width: 16),
-                          const Text(
-                            'Indisponible',
+                          title: Text(
+                            tier['type'] ?? '',
                             style: TextStyle(
-                              fontSize: 12,
+                              fontWeight: FontWeight.bold,
                               fontFamily: "b",
-                              color: Color(0xFFEF4444),
-                              fontWeight: FontWeight.w500,
+                              color: isCurrent
+                                  ? const Color(0xFF3B82F6)
+                                  : reached
+                                      ? const Color(0xFF10B981)
+                                      : const Color(0xFF6B7280),
+                              fontSize: 15,
                             ),
                           ),
-                        ],
-                        const SizedBox(width: 16),
-                        // Affiche le nom de la boutique
-                        Text(
-                          reward.store,
-                          style: const TextStyle(
-                            fontSize: 12,
-                            fontFamily: "r",
-                            color: Color(0xFF3B82F6),
+                          subtitle: Row(
+                            children: [
+                              if ((tier['reward'] ?? '').toString().isNotEmpty)
+                                Flexible(
+                                  child: Text(
+                                    tier['reward'],
+                                    style: const TextStyle(
+                                      fontFamily: "r",
+                                      color: Color(0xFF6B7280),
+                                      fontSize: 13,
+                                    ),
+                                    overflow: TextOverflow.ellipsis,
+                                  ),
+                                ),
+                              if ((tier['reward'] ?? '').toString().isNotEmpty)
+                                const SizedBox(width: 10),
+                              Container(
+                                padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
+                                decoration: BoxDecoration(
+                                  color: const Color(0xFFF3F4F6),
+                                  borderRadius: BorderRadius.circular(8),
+                                ),
+                                child: Text(
+                                  '${tier['value']} pts',
+                                  style: const TextStyle(
+                                    fontSize: 12,
+                                    fontFamily: "b",
+                                    color: Color(0xFF3B82F6),
+                                    fontWeight: FontWeight.w600,
+                                  ),
+                                ),
+                              ),
+                            ],
                           ),
+                          trailing: isCurrent
+                              ? const Icon(Icons.check_circle, color: Color(0xFF3B82F6), size: 28)
+                              : null,
                         ),
-                      ],
-                    ),
+                      );
+                    }),
                   ],
                 ),
               ),
-            ],
-          ),
+            Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 25),
+              child: Text(
+                          'Vos récompenses',
+                          style: const TextStyle(
+                            fontWeight: FontWeight.bold,
+                            fontSize: 15,
+                            fontFamily: "b",
+                            color: Color.fromARGB(255, 0, 0, 0),
+                          ),
+                        ),
+            ),
+            // (Filtres boutiques et catégories désactivés ici)
+            const SizedBox(height: 20),
+            // Rewards list
+            Expanded(
+              child: filteredRewards.isEmpty
+                  ? const Center(
+                      child: Text(
+                        "Aucune récompense atteinte pour l'instant.",
+                        style: TextStyle(fontSize: 15, color: Color(0xFF6B7280)),
+                      ),
+                    )
+                  : ListView.separated(
+                      itemCount: filteredRewards.length,
+                      separatorBuilder: (_, __) => const SizedBox(height: 10),
+                      itemBuilder: (context, index) {
+                        final reward = filteredRewards[index];
+                        final status = reward.rewardStatus;
+                        final color = status == 'octroyee'
+                            ? Colors.green
+                            : status == 'en_attente'
+                                ? Colors.orange
+                                : Colors.red;
 
-          const SizedBox(height: 16),
-
-          SizedBox(
-            width: double.infinity,
-            child: ElevatedButton(
-              onPressed: reward.available && canAfford ? () => _redeemReward(reward) : null,
+                                                return Container(
+                          margin: const EdgeInsets.symmetric(horizontal: 20),
+                          padding: const EdgeInsets.all(18),
+                          decoration: BoxDecoration(
+                            color: Colors.white,
+                            borderRadius: BorderRadius.circular(18),
+                            boxShadow: [
+                              BoxShadow(
+                                color: Colors.black.withOpacity(0.07),
+                                blurRadius: 12,
+                                offset: const Offset(0, 4),
+                              ),
+                            ],
+                            border: Border.all(
+                              color: Color(0xFF10B981).withOpacity(0.2),
+                              width: 1.2,
+                            ),
+                          ),
+                          child: Column(
+                            children: [
+                              Row(
+                                children: [
+                                  CircleAvatar(
+                                    radius: 26,
+                                    backgroundColor: Color(0xFF10B981),
+                                    child: Icon(
+                                      Icons.card_giftcard,
+                                      color: Colors.white,
+                                      size: 28,
+                                    ),
+                                  ),
+                                  const SizedBox(width: 18),
+                                  Expanded(
+                                    child: Column(
+                                      crossAxisAlignment: CrossAxisAlignment.start,
+                                      children: [
+                                        Text(
+                                          reward.store,
+                                          style: TextStyle(
+                                            fontSize: 16,
+                                            fontFamily: "b",
+                                            fontWeight: FontWeight.bold,
+                                            color: Color(0xFF10B981),
+                                          ),
+                                        ),
+                                        const SizedBox(height: 4),
+                                        Text(
+                                          "Récompense : ${reward.title}",
+                                          style: const TextStyle(
+                                            fontSize: 13,
+                                            fontFamily: "r",
+                                            color: Color.fromARGB(255, 0, 0, 0),
+                                          ),
+                                        ),
+                                        const SizedBox(height: 4),
+                                        Text(
+                                          status == 'octroyee'
+                                              ? "Récompense encaissée"
+                                              : status == 'en_attente'
+                                                  ? "En attente d'encaissement"
+                                                  : "En attente d'encaissement",
+                                          style: TextStyle(
+                                            fontSize: 13,
+                                            color: color,
+                                            fontFamily: "r",
+                                            fontWeight: FontWeight.w600,
+                                          ),
+                                        ),
+                                      ],
+                                    ),
+                                  ),
+                                ],
+                              ),
+                              const SizedBox(height: 12),
+    SizedBox(
+      width: double.infinity,
+      child: reward.statutByClient != 'confirmé'
+          ? ElevatedButton.icon(
+              icon: const Icon(Icons.check_circle, color: Colors.white, size: 20),
+              label: const Text(
+                "Je confirme avoir encaissé",
+                style: TextStyle(
+                  fontFamily: "b",
+                  fontWeight: FontWeight.w600,
+                  fontSize: 14,
+                ),
+              ),
               style: ElevatedButton.styleFrom(
-                backgroundColor: reward.available && canAfford
-                    ? const Color(0xFF3B82F6)
-                    : const Color(0xFFE5E7EB),
-                foregroundColor: reward.available && canAfford
-                    ? Colors.white
-                    : const Color(0xFF9CA3AF),
+                backgroundColor: const Color(0xFF10B981),
+                foregroundColor: Colors.white,
                 padding: const EdgeInsets.symmetric(vertical: 12),
                 shape: RoundedRectangleBorder(
                   borderRadius: BorderRadius.circular(8),
                 ),
               ),
-              child: Text(
-                !reward.available
-                    ? 'Indisponible'
-                    : !canAfford
-                        ? 'Points insuffisants'
-                        : 'Échanger',
-                style: const TextStyle(
+              onPressed: () => _updateRewardStatusByClient(reward, 'confirmé'),
+            )
+          : ElevatedButton.icon(
+              icon: const Icon(Icons.check_circle, color: Colors.white, size: 20),
+              label: const Text(
+                "Déjà confirmé",
+                style: TextStyle(
                   fontFamily: "b",
-                  fontSize: 13,
                   fontWeight: FontWeight.w600,
+                  fontSize: 14,
                 ),
               ),
-            ),
-          ),
-        ],
-      ),
-    );
-  }
-
-  IconData _getIconData(String iconName) {
-    switch (iconName) {
-      case 'shopping_bag':
-        return Icons.shopping_bag;
-      case 'local_cafe':
-        return Icons.local_cafe;
-      case 'headphones':
-        return Icons.headphones;
-      case 'smartphone':
-        return Icons.smartphone;
-      default:
-        return Icons.card_giftcard;
-    }
-  }
-
-  void _redeemReward(Reward reward) {
-    showDialog(
-      context: context,
-      builder: (context) => AlertDialog(
-        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
-        title: const Text('Confirmer l\'échange'),
-        content: Text('Voulez-vous échanger ${reward.points} points contre "${reward.title}" ?'),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(context),
-            child: const Text('Annuler'),
-          ),
-          ElevatedButton(
-            onPressed: () {
-              Navigator.pop(context);
-              // Handle reward redemption
-              ScaffoldMessenger.of(context).showSnackBar(
-                SnackBar(
-                  content: Text('${reward.title} échangé avec succès !'),
-                  backgroundColor: const Color(0xFF10B981),
+              style: ElevatedButton.styleFrom(
+                backgroundColor: Colors.grey,
+                foregroundColor: Colors.white,
+                padding: const EdgeInsets.symmetric(vertical: 12),
+                shape: RoundedRectangleBorder(
+                  borderRadius: BorderRadius.circular(8),
                 ),
-              );
-            },
-            child: const Text('Confirmer'),
-          ),
-        ],
+              ),
+              onPressed: null,
+            ),)
+                            ],
+                          ),
+                        );
+                      },
+                    ),
+            ),
+          ],
+        ),
       ),
     );
   }

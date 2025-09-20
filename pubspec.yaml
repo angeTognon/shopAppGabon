@@ -41,6 +41,8 @@ dependencies:
   flutter_animate:
   qr_flutter: ^4.1.0
   http: 
+  url_launcher:
+  flutter_phoenix:
   
 dev_dependencies:
   flutter_test:

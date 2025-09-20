@@ -11,6 +11,9 @@ class User {
   final String memberSince;
   final String storeName;
   final List<dynamic>? rewards;
+    final String? customMessage;
+  final String? status;
+
   final Map<String, dynamic>? tierColors;
 
   User({
@@ -18,6 +21,8 @@ class User {
     required this.email,
     required this.firstName,
     required this.lastName,
+        this.customMessage,
+
     this.phone,
     required this.points,
     required this.tier,
@@ -25,6 +30,7 @@ class User {
     required this.storeName,
     this.rewards,
     this.tierColors,
+    this.status,
   });
 
   factory User.fromJson(Map<String, dynamic> json) {
@@ -36,6 +42,8 @@ class User {
       phone: json['phone'],
       points: int.tryParse(json['points'].toString()) ?? 0,
       tier: json['tier'] ?? '',
+            customMessage: json['custom_message'],
+
       memberSince: json['memberSince'] ?? json['member_since']?.toString() ?? '',
       storeName: json['storeName'] ?? json['store_name'] ?? '',
       rewards: json['rewards'] is String
@@ -44,6 +52,7 @@ class User {
       tierColors: json['tier_colors'] is String
           ? (json['tier_colors']?.isNotEmpty == true ? Map<String, dynamic>.from(jsonDecode(json['tier_colors'])) : null)
           : json['tier_colors'],
+      status: (json['status'] ?? json['status'] ?? json['user_status'])?.toString(),
     );
   }
 
@@ -60,6 +69,7 @@ class User {
       'storeName': storeName,
       'rewards': rewards,
       'tier_colors': tierColors,
+      'status': status,
     };
   }
 
@@ -75,6 +85,7 @@ class User {
     String? storeName,
     List<dynamic>? rewards,
     Map<String, dynamic>? tierColors,
+    String? status,
   }) {
     return User(
       id: id ?? this.id,
@@ -88,6 +99,7 @@ class User {
       storeName: storeName ?? this.storeName,
       rewards: rewards ?? this.rewards,
       tierColors: tierColors ?? this.tierColors,
+      status: status ?? this.status,
     );
   }
 }
@@ -114,7 +126,9 @@ class Purchase {
 
   factory Purchase.fromJson(Map<String, dynamic> json) {
     return Purchase(
-      id: json['id'],
+      id: json['id'] is int
+          ? json['id']
+          : int.tryParse(json['id'].toString()) ?? 0,
       date: json['date'] ?? '',
       amount: (json['amount'] is double)
           ? json['amount']
@@ -132,6 +146,7 @@ class Purchase {
 class Reward {
   final int id;
   final String title;
+  final String type;
   final String description;
   final int points;
   final String category;
@@ -139,34 +154,47 @@ class Reward {
   final String iconName;
   final String color;
   final String store;
+  final int merchantId;
+final String statutByClient;
+
+    final String rewardStatus;
+
 
   Reward({
     required this.id,
+    required this.type,
     required this.title,
+        required this.statutByClient,
+ required this.merchantId,
     required this.description,
     required this.points,
     required this.category,
     required this.available,
     required this.iconName,
     required this.color,
+        this.rewardStatus = '',
+
     required this.store,
   });
 
-  factory Reward.fromJson(Map<String, dynamic> json) {
+    factory Reward.fromJson(Map<String, dynamic> json) {
     return Reward(
-      id: json['id'],
-      title: json['title'] ?? '',
+      id: int.tryParse(json['id'].toString()) ?? 0,
+      type: json['type'] ?? '',
+      merchantId: int.tryParse(json['merchant_id'].toString()) ?? 0,
+statutByClient: (json['statut_by_client'] ?? '').toString(),
+    title: json['reward'] ?? '', // <-- ici, pas 'title'
       description: json['description'] ?? '',
       points: int.tryParse(json['points'].toString()) ?? 0,
       category: json['category'] ?? '',
-      available: json['available'] ?? false,
-      iconName: json['iconName'] ?? 'card_giftcard',
+      available: json['available'].toString() == '1' || json['available'] == true,
+      iconName: json['icon_name'] ?? '',
       color: json['color'] ?? '0xFF3B82F6',
       store: json['store'] ?? '',
+      rewardStatus: (json['reward_status'] ?? '')?.toString() ?? '',
     );
   }
 }
-
 class Bonus {
   final int id;
   final String title;

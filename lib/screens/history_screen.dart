@@ -1,5 +1,9 @@
+import 'dart:convert';
+import 'dart:async'; // <-- Ajoute ceci
 import 'package:flutter/material.dart';
+import 'package:http/http.dart' as http;
 import '../models/user_model.dart';
+import '../const.dart';
 
 class HistoryScreen extends StatefulWidget {
   final User user;
@@ -11,290 +15,140 @@ class HistoryScreen extends StatefulWidget {
 }
 
 class _HistoryScreenState extends State<HistoryScreen> {
-  String _selectedPeriod = 'Tous';
-  String _selectedStore = 'Toutes';
-
-  final List<String> _stores = [
-    'Toutes',
-   
-  ];
-
-  final List<String> _periods = ['Tous', 'Cette semaine', 'Ce mois', 'Cette année'];
-
-  final List<Purchase> _purchases = [
-    
-  ];
+  List<NotificationClient> _notifications = [];
+  bool _isLoading = true;
+  String? _error;
+  Timer? _refreshTimer; // <-- Ajoute ceci
 
   @override
-  Widget build(BuildContext context) {
-    // Filtrage par boutique
-    final filteredPurchases = _purchases.where((purchase) {
-      final matchesStore = _selectedStore == 'Toutes' || purchase.store == _selectedStore;
-      // Ici tu peux ajouter un filtrage par période si besoin
-      return matchesStore;
-    }).toList();
+  void initState() {
+    super.initState();
+    _fetchNotifications();
+    _refreshTimer = Timer.periodic(const Duration(seconds: 1), (timer) {
+      _fetchNotifications();
+    });
+  }
 
-    final totalSpent = filteredPurchases.fold<double>(0, (sum, purchase) => sum + purchase.amount);
-    final totalPoints = filteredPurchases.fold<int>(0, (sum, purchase) => sum + purchase.points);
+  @override
+  void dispose() {
+    _refreshTimer?.cancel(); // <-- Ajoute ceci
+    super.dispose();
+  }
+
+  Future<void> _fetchNotifications() async {
+    setState(() {
+      _isLoading = true;
+      _error = null;
+    });
+    try {
+      final notifications = await fetchNotifications(widget.user.id);
+      setState(() {
+        _notifications = notifications;
+        _isLoading = false;
+      });
+    } catch (e) {
+      setState(() {
+        _error = e.toString();
+        _isLoading = false;
+      });
+    }
+  }
+
+  Future<List<NotificationClient>> fetchNotifications(String clientId) async {
+    final response = await http.get(Uri.parse('$baseUrl/get_notifications.php?client_id=$clientId'));
+    final data = jsonDecode(response.body);
+    if (response.statusCode == 200 && data['success'] == true && data['notifications'] != null) {
+      return List<Map<String, dynamic>>.from(data['notifications'])
+          .map((json) => NotificationClient.fromJson(json))
+          .toList();
+    } else {
+      return [];
+    }
+  }
+Future<void> _deleteNotification(int notificationId) async {
+  try {
+    final response = await http.post(
+      Uri.parse('$baseUrl/delete_notification.php'),
+      body: {'id': notificationId.toString()},
+    );
+    final data = jsonDecode(response.body);
+    if (data['success'] == true) {
+      setState(() {
+        _notifications.removeWhere((n) => n.id == notificationId);
+      });
+    } else {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text(data['error'] ?? 'Erreur lors de la suppression')),
+      );
+    }
+  } catch (e) {
+    ScaffoldMessenger.of(context).showSnackBar(
+      const SnackBar(content: Text('Erreur réseau')),
+    );
+  }
+}
+  @override
+  Widget build(BuildContext context) {
+    // if (_isLoading) {
+    //   return const Scaffold(
+    //     backgroundColor: Color(0xFFF8FAFC),
+    //     body: Center(child: CircularProgressIndicator()),
+    //   );
+    // }
+    if (_error != null) {
+      return Scaffold(
+        backgroundColor: const Color(0xFFF8FAFC),
+        body: Center(child: Text('Erreur : $_error')),
+      );
+    }
 
     return Scaffold(
       backgroundColor: const Color(0xFFF8FAFC),
-      body: SafeArea(
-        child: Column(
-          children: [
-            // Header
-            Padding(
-              padding: const EdgeInsets.all(20.0),
-              child: Row(
-                mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                children: [
-                  const Text(
-                    'Historique',
-                    style: TextStyle(
-                      fontFamily: "b",
-                      fontSize: 18,
-                      fontWeight: FontWeight.bold,
-                      color: Color(0xFF1F2937),
-                    ),
-                  ),
-                  IconButton(
-                    onPressed: () {},
-                    icon: const Icon(Icons.filter_list, color: Color(0xFF3B82F6)),
-                  ),
-                ],
-              ),
-            ),
-
-            // Filtre boutiques esthétique
-            Padding(
-              padding: const EdgeInsets.symmetric(horizontal: 20.0, vertical: 8),
-              child: SizedBox(
-                height: 40,
-                child: ListView.separated(
-                  scrollDirection: Axis.horizontal,
-                  itemCount: _stores.length,
-                  separatorBuilder: (context, index) => const SizedBox(width: 10),
-                  itemBuilder: (context, index) {
-                    final store = _stores[index];
-                    final isSelected = _selectedStore == store;
-                    return GestureDetector(
-                      onTap: () {
-                        setState(() {
-                          _selectedStore = store;
-                        });
-                      },
-                      child: AnimatedContainer(
-                        duration: const Duration(milliseconds: 200),
-                        padding: const EdgeInsets.symmetric(horizontal: 18, vertical: 8),
-                        decoration: BoxDecoration(
-                          color: isSelected ? const Color(0xFF3B82F6) : Colors.white,
-                          borderRadius: BorderRadius.circular(20),
-                          border: Border.all(
-                            color: isSelected ? const Color(0xFF3B82F6) : const Color(0xFFE5E7EB),
-                            width: 1.5,
-                          ),
-                          boxShadow: isSelected
-                              ? [
-                                  BoxShadow(
-                                    color: const Color(0xFF3B82F6).withOpacity(0.15),
-                                    blurRadius: 8,
-                                    offset: const Offset(0, 2),
-                                  ),
-                                ]
-                              : [],
-                        ),
-                        child: Row(
-                          children: [
-                            Icon(
-                              store == 'Toutes'
-                                  ? Icons.store_mall_directory
-                                  : store == 'Boutique Fashion'
-                                      ? Icons.shopping_bag
-                                      : store == 'Café Paris'
-                                          ? Icons.local_cafe
-                                          : Icons.devices_other,
-                              size: 18,
-                              color: isSelected ? Colors.white : const Color(0xFF3B82F6),
-                            ),
-                            const SizedBox(width: 7),
-                            Text(
-                              store,
-                              style: TextStyle(
-                                color: isSelected ? Colors.white : const Color(0xFF3B82F6),
-                                fontWeight: FontWeight.w600,
-                                fontFamily: "b",
-                                fontSize: 13,
-                              ),
-                            ),
-                          ],
-                        ),
-                      ),
-                    );
-                  },
-                ),
-              ),
-            ),
-            SizedBox(height: 5,),
-            // Statistics
-            Padding(
-              padding: const EdgeInsets.symmetric(horizontal: 20.0),
-              child: Row(
-                children: [
-                  Expanded(
-                    child: _buildStatCard(
-                      icon: Icons.trending_up,
-                      value: '${totalSpent.toStringAsFixed(2)}€',
-                      label: 'Total dépensé',
-                      color: const Color(0xFF3B82F6),
-                    ),
-                  ),
-                  const SizedBox(width: 12),
-                  Expanded(
-                    child: _buildStatCard(
-                      icon: Icons.star,
-                      value: totalPoints.toString(),
-                      label: 'Points gagnés',
-                      color: const Color(0xFFF59E0B),
-                    ),
-                  ),
-                ],
-              ),
-            ),
-
-            const SizedBox(height: 20),
-
-            // Period filter
-            SizedBox(
-              height: 40,
-              child: ListView.builder(
-                scrollDirection: Axis.horizontal,
-                padding: const EdgeInsets.symmetric(horizontal: 20),
-                itemCount: _periods.length,
-                itemBuilder: (context, index) {
-                  final period = _periods[index];
-                  final isSelected = _selectedPeriod == period;
-                  
-                  return GestureDetector(
-                    onTap: () {
-                      setState(() {
-                        _selectedPeriod = period;
-                      });
-                    },
-                    child: Container(
-                      margin: const EdgeInsets.only(right: 12,bottom: 3),
-                      padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 8),
-                      decoration: BoxDecoration(
-                        color: isSelected ? const Color(0xFF3B82F6) : Colors.white,
-                        borderRadius: BorderRadius.circular(20),
-                        boxShadow: [
-                          BoxShadow(
-                            color: Colors.black.withOpacity(0.1),
-                            blurRadius: 4,
-                            offset: const Offset(0, 2),
-                          ),
-                        ],
-                      ),
-                      child: Center(
-                        child: Text(
-                          period,
-                          style: TextStyle(
-                            fontFamily: "r",
-                            fontSize: 13,
-                            fontWeight: FontWeight.w500,
-                            color: isSelected ? Colors.white : const Color(0xFF6B7280),
-                          ),
-                        ),
-                      ),
-                    ),
-                  );
-                },
-              ),
-            ),
-
-            const SizedBox(height: 20),
-
-            // Purchases list
-            Expanded(
-              child: ListView.builder(
-                padding: const EdgeInsets.symmetric(horizontal: 20),
-                itemCount: filteredPurchases.length,
-                itemBuilder: (context, index) {
-                  final purchase = filteredPurchases[index];
-                  return _buildPurchaseCard(purchase);
-                },
-              ),
-            ),
-          ],
+      appBar: AppBar(
+        titleTextStyle: TextStyle(
+          fontFamily: "b",
+          fontSize: 20,
+          color: const Color(0xFF1F2937),
         ),
+        title: const Text('Notifications'),
+        backgroundColor: Colors.white,
+        foregroundColor: const Color(0xFF1F2937),
+        elevation: 0,
       ),
+      body: _notifications.isEmpty
+          ? const Center(
+              child: Text(
+                "Aucune notification.",
+                style: TextStyle(
+                  fontFamily: "r",
+                  fontSize: 15,
+                  color: Color(0xFF6B7280),
+                ),
+              ),
+            )
+          : ListView.builder(
+              padding: const EdgeInsets.all(20),
+              itemCount: _notifications.length,
+              itemBuilder: (context, index) {
+                final notif = _notifications[index];
+                return _buildNotificationCard(notif);
+              },
+            ),
     );
   }
 
-  Widget _buildStatCard({
-    required IconData icon,
-    required String value,
-    required String label,
-    required Color color,
-  }) {
-    return Container(
-      padding: const EdgeInsets.all(16),
-      decoration: BoxDecoration(
-        color: Colors.white,
-        borderRadius: BorderRadius.circular(12),
-        boxShadow: [
-          BoxShadow(
-            color: Colors.black.withOpacity(0.1),
-            blurRadius: 8,
-            offset: const Offset(0, 2),
-          ),
-        ],
-      ),
-      child: Row(
-        children: [
-          Container(
-            width: 40,
-            height: 40,
-            decoration: BoxDecoration(
-              color: const Color(0xFFF0F9FF),
-              borderRadius: BorderRadius.circular(8),
-            ),
-            child: Icon(icon, size: 20, color: color),
-          ),
-          const SizedBox(width: 12),
-          Expanded(
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Text(
-                  value,
-                  style: const TextStyle(
-                    fontSize: 15,
-                    fontFamily: "b",
-                    fontWeight: FontWeight.bold,
-                    color: Color(0xFF1F2937),
-                  ),
-                ),
-                Text(
-                  label,
-                  style: const TextStyle(
-                    fontFamily: "r",
-                    fontSize: 12,
-                    color: Color(0xFF6B7280),
-                  ),
-                ),
-              ],
-            ),
-          ),
-        ],
-      ),
-    );
-  }
-
-  Widget _buildPurchaseCard(Purchase purchase) {
-    final statusColor = purchase.status == 'completed' 
-        ? const Color(0xFF10B981) 
-        : const Color(0xFFF59E0B);
-    
+    Widget _buildNotificationCard(NotificationClient notif) {
+    String dateStr = '';
+    if (notif.createdAt.isNotEmpty) {
+      final date = DateTime.tryParse(notif.createdAt);
+      if (date != null) {
+        dateStr = '${date.day.toString().padLeft(2, '0')}/'
+            '${date.month.toString().padLeft(2, '0')}/'
+            '${date.year} '
+            '${date.hour.toString().padLeft(2, '0')}:'
+            '${date.minute.toString().padLeft(2, '0')}';
+      }
+    }
     return Container(
       margin: const EdgeInsets.only(bottom: 12),
       padding: const EdgeInsets.all(16),
@@ -303,158 +157,94 @@ class _HistoryScreenState extends State<HistoryScreen> {
         borderRadius: BorderRadius.circular(12),
         boxShadow: [
           BoxShadow(
-            color: Colors.black.withOpacity(0.1),
-            blurRadius: 8,
+            color: Colors.black.withOpacity(0.07),
+            blurRadius: 6,
             offset: const Offset(0, 2),
           ),
         ],
       ),
-      child: Column(
+      child: Row(
         children: [
-          Row(
-            children: [
-              Container(
-                width: 40,
-                height: 40,
-                decoration: BoxDecoration(
-                  color: const Color(0xFFF0F9FF),
-                  borderRadius: BorderRadius.circular(8),
-                ),
-                child: const Icon(
-                  Icons.shopping_bag,
-                  size: 20,
-                  color: Color(0xFF3B82F6),
-                ),
-              ),
-              const SizedBox(width: 12),
-              Expanded(
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Text(
-                      purchase.store,
-                      style: const TextStyle(
-                        fontSize: 14,
-                        fontWeight: FontWeight.w600,
-                        fontFamily: "b",
-                        color: Color(0xFF1F2937),
-                      ),
-                    ),
-                    Text(
-                      _formatDate(purchase.date),
-                      style: const TextStyle(
-                        fontFamily: "r",
-                        fontSize: 13,
-                        color: Color(0xFF6B7280),
-                      ),
-                    ),
-                  ],
-                ),
-              ),
-              Row(
-                children: [
-                  Container(
-                    width: 8,
-                    height: 8,
-                    decoration: BoxDecoration(
-                      color: statusColor,
-                      borderRadius: BorderRadius.circular(4),
-                    ),
-                  ),
-                  const SizedBox(width: 6),
-                  Text(
-                    purchase.status == 'completed' ? 'Complété' : 'En attente',
-                    style: TextStyle(
-                      fontSize: 12,
-                      fontFamily: "r",
-                      fontWeight: FontWeight.w500,
-                      color: statusColor,
-                    ),
-                  ),
-                ],
-              ),
-            ],
-          ),
-          
-          const SizedBox(height: 12),
-          
-          // Items
-          Align(
-            alignment: Alignment.centerLeft,
-            child: Padding(
-              padding: const EdgeInsets.only(left: 52),
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  const Text(
-                    'Articles :',
-                    style: TextStyle(
-                      fontSize: 14,
-                      fontFamily: "r",
-                      fontWeight: FontWeight.w500,
-                      color: Color(0xFF6B7280),
-                    ),
-                  ),
-                  const SizedBox(height: 4),
-                  Text(
-                    purchase.items.join(', '),
-                    style: const TextStyle(
-                      fontFamily: "r",
-                      fontSize: 13,
-                      color: Color(0xFF374151),
-                    ),
-                  ),
-                ],
-              ),
-            ),
-          ),
-          
-          const SizedBox(height: 12),
-          
-          // Amount and points
-          Padding(
-            padding: const EdgeInsets.only(left: 52),
-            child: Row(
-              mainAxisAlignment: MainAxisAlignment.spaceBetween,
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
               children: [
                 Text(
-                  '${purchase.amount.toStringAsFixed(2)}€',
+                  notif.title,
                   style: const TextStyle(
-                    fontSize: 17,
+                    fontSize: 14,
                     fontFamily: "b",
-                    fontWeight: FontWeight.bold,
+                    fontWeight: FontWeight.w600,
                     color: Color(0xFF1F2937),
                   ),
                 ),
-                Row(
-                  children: [
-                    const Icon(Icons.star, size: 16, color: Color(0xFFF59E0B)),
-                    const SizedBox(width: 4),
-                    Text(
-                      '+${purchase.points} points',
-                      style: const TextStyle(
-                        fontFamily: "r",
-                        fontSize: 13,
-                        fontWeight: FontWeight.w600,
-                        color: Color(0xFFF59E0B),
-                      ),
-                    ),
-                  ],
+                const SizedBox(height: 4),
+                Text(
+                  notif.message,
+                  style: const TextStyle(
+                    fontFamily: "r",
+                    fontSize: 13,
+                    color: Color(0xFF6B7280),
+                  ),
                 ),
+                if (dateStr.isNotEmpty) ...[
+                  const SizedBox(height: 4),
+                  Text(
+                    dateStr,
+                    style: const TextStyle(
+                      fontSize: 11,
+                      color: Color(0xFF9CA3AF),
+                    ),
+                  ),
+                ],
               ],
             ),
+          ),
+          Container(
+            width: 8,
+            height: 8,
+            margin: const EdgeInsets.only(right: 12),
+            decoration: BoxDecoration(
+              color: notif.type == 'offer'
+                  ? const Color(0xFF10B981)
+                  : const Color(0xFFF59E0B),
+              borderRadius: BorderRadius.circular(4),
+            ),
+          ),
+          IconButton(
+            icon: const Icon(Icons.delete, color: Color(0xFFEF4444)),
+            tooltip: "Supprimer",
+            onPressed: () => _deleteNotification(notif.id),
           ),
         ],
       ),
     );
   }
+}
 
-  String _formatDate(String dateString) {
-    final date = DateTime.parse(dateString);
-    final months = [
-      'janvier', 'février', 'mars', 'avril', 'mai', 'juin',
-      'juillet', 'août', 'septembre', 'octobre', 'novembre', 'décembre'
-    ];
-    return '${date.day} ${months[date.month - 1]} ${date.year}';
+// Modèle NotificationClient à placer dans models/notification_client.dart ou ici si besoin
+class NotificationClient {
+  final int id;
+  final String title;
+  final String message;
+  final String type;
+  final String createdAt;
+
+  NotificationClient({
+    required this.id,
+    required this.title,
+    required this.message,
+    required this.type,
+    required this.createdAt,
+  });
+
+  factory NotificationClient.fromJson(Map<String, dynamic> json) {
+    return NotificationClient(
+      id: int.tryParse(json['id'].toString()) ?? 0,
+      title: json['title'] ?? '',
+      message: json['message'] ?? '',
+      type: json['type'] ?? '',
+      createdAt: json['created_at'] ?? '',
+    );
   }
 }

@@ -18,22 +18,8 @@ class HomeScreen extends StatefulWidget {
 }
 
 class _HomeScreenState extends State<HomeScreen> {
-  List<Map<String, dynamic>> _notifications = [
-    {
-      'id': 1,
-      'title': 'Nouvelle offre disponible',
-      'message': '20% sur votre prochain achat',
-      'type': 'offer'
-    },
-    {
-      'id': 2,
-      'title': 'Points à expirer',
-      'message': '500 points expirent dans 7 jours',
-      'type': 'warning'
-    },
-  ];
-
-  User? _user;
+  List<Map<String, dynamic>> _notifications = [];
+  late User _user;
   bool _isLoading = true;
   String? _error;
   Timer? _refreshTimer;
@@ -42,9 +28,10 @@ class _HomeScreenState extends State<HomeScreen> {
   @override
   void initState() {
     super.initState();
+    _user = widget.user; // Initialiser avec l'utilisateur passé en paramètre
     _fetchUser();
     // Rafraîchit toutes les 10 secondes
-    _refreshTimer = Timer.periodic(const Duration(seconds: 10), (timer) {
+    _refreshTimer = Timer.periodic(const Duration(seconds: 1), (timer) {
       _fetchUser();
     });
   }
@@ -62,8 +49,10 @@ class _HomeScreenState extends State<HomeScreen> {
     });
     try {
       final user = await fetchUserById(widget.user.id);
+      final notifications = await fetchNotifications(user.id);
       setState(() {
         _user = user;
+        _notifications = notifications;
         _isLoading = false;
       });
     } catch (e) {
@@ -89,6 +78,99 @@ class _HomeScreenState extends State<HomeScreen> {
     }
   }
 
+  Future<List<Map<String, dynamic>>> fetchNotifications(String clientId) async {
+    final response = await http.get(Uri.parse('$baseUrl/get_notifications.php?client_id=$clientId'));
+    final data = jsonDecode(response.body);
+    print('Notifications après suppression: $data'); // Ajoute ce print
+    if (response.statusCode == 200 && data['success'] == true) {
+      return List<Map<String, dynamic>>.from(data['notifications']);
+    } else {
+      return [];
+    }
+  }
+
+  // Ajoute une notification côté serveur
+  Future<void> addNotification({
+    required String clientId,
+    required String title,
+    required String message,
+    String type = 'info',
+  }) async {
+    await http.post(
+      Uri.parse('$baseUrl/add_notification.php'),
+      body: {
+        'client_id': clientId,
+        'title': title,
+        'message': message,
+        'type': type,
+      },
+    );
+  }
+
+  // Ajoute des points et gère la logique de reset + notification
+  Future<void> addPoints(int points) async {
+    final pointsToNextTier = _getPointsToNextTier(_user.points);
+    if (pointsToNextTier <= 0) {
+      // Niveau max atteint, reset points et notifie
+      await resetUserPoints(_user.id);
+      await addNotification(
+        clientId: _user.id,
+        title: "Cycle de points terminé",
+        message: "Vous avez atteint le niveau maximum, vos points repartent à zéro.",
+        type: "info",
+      );
+      setState(() {
+        _user = _user.copyWith(points: 0);
+      });
+      await _fetchUser();
+    } else {
+      // Ajoute normalement les points (exemple d'appel API)
+      await addPointsToUser(_user.id, points);
+      await addNotification(
+        clientId: _user.id,
+        title: "Points ajoutés",
+        message: "$points points ajoutés. Il vous reste $pointsToNextTier points pour le prochain niveau.",
+        type: "info",
+      );
+      await _fetchUser();
+    }
+  }
+
+  // Exemple d'appel API pour reset points
+  Future<void> resetUserPoints(String id) async {
+    final response = await http.post(
+      Uri.parse('$baseUrl/reset_points.php'),
+      body: {'id': id},
+    );
+    final data = jsonDecode(response.body);
+    if (data['success'] != true) {
+      throw Exception('Erreur lors de la remise à zéro des points');
+    }
+  }
+
+  // Exemple d'appel API pour ajouter des points
+  Future<void> addPointsToUser(String id, int points) async {
+    final response = await http.post(
+      Uri.parse('$baseUrl/add_points.php'),
+      body: {'id': id, 'points': points.toString()},
+    );
+    final data = jsonDecode(response.body);
+    if (data['success'] != true) {
+      throw Exception('Erreur lors de l\'ajout de points');
+    }
+  }
+
+  bool _isMaxLevel(int userPoints) {
+    if (_user.rewards != null && _user.rewards is List) {
+      final rewards = List<Map<String, dynamic>>.from(_user.rewards as List)
+        ..sort((a, b) => int.parse(a['value'].toString()).compareTo(int.parse(b['value'].toString())));
+      if (rewards.isEmpty) return false;
+      final maxValue = int.tryParse(rewards.last['value'].toString()) ?? 0;
+      return userPoints >= maxValue;
+    }
+    return false;
+  }
+
   @override
   Widget build(BuildContext context) {
     // if (_isLoading) {
@@ -96,12 +178,12 @@ class _HomeScreenState extends State<HomeScreen> {
     //     body: Center(child: CircularProgressIndicator()),
     //   );
     // }
-    if (_error != null) {
-      return Scaffold(
-        body: Center(child: Text('Erreur : $_error')),
-      );
-    }
-    final user = _user!;
+    // if (_error != null) {
+    //   return Scaffold(
+    //     body: Center(child: Text('Erreur : $_error')),
+    //   );
+    // }
+    final user = _user;
 
     final pointsToNextTier = _getPointsToNextTier(user.points);
     final progressPercentage = _getProgressPercentage(user.points);
@@ -219,6 +301,36 @@ class _HomeScreenState extends State<HomeScreen> {
                   ),
                 ),
 
+                                // Après le QrImageView et le Text "Scannez pour voir mes infos"
+                if (user.storeName.isNotEmpty && user.customMessage != null && user.customMessage!.isNotEmpty)
+                  Padding(
+                    padding: const EdgeInsets.only(top: 16.0),
+                    child: Container(
+                      width: double.infinity,
+                      decoration: BoxDecoration(
+                        color: const Color(0xFFEEF6FF),
+                        borderRadius: BorderRadius.circular(12),
+                        border: Border.all(color: const Color(0xFF3B82F6).withOpacity(0.15)),
+                      ),
+                      padding: const EdgeInsets.all(16),
+                      child: Row(
+                        children: [
+                          const Icon(Icons.info_outline, color: Color(0xFF3B82F6)),
+                          const SizedBox(width: 10),
+                          Expanded(
+                            child: Text(
+                              user.customMessage!,
+                              style: const TextStyle(
+                                fontFamily: "r",
+                                fontSize: 14,
+                                color: Color(0xFF1F2937),
+                              ),
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+                  ),
                 const SizedBox(height: 20),
 
                 // Points Card (pas d'animation répétée)
@@ -356,52 +468,7 @@ class _HomeScreenState extends State<HomeScreen> {
 
                 const SizedBox(height: 22),
 
-                // Quick Actions
-                Padding(
-                  padding: const EdgeInsets.symmetric(horizontal: 20.0),
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      const Text(
-                        'Actions rapides',
-                        style: TextStyle(
-                          fontSize: 16,
-                          fontFamily: "b",
-                          fontWeight: FontWeight.bold,
-                          color: Color(0xFF1F2937),
-                        ),
-                      ),
-                      const SizedBox(height: 16),
-                      Row(
-                        mainAxisAlignment: MainAxisAlignment.spaceEvenly,
-                        children: [
-                          _buildActionButton(
-                            icon: Icons.card_giftcard,
-                            label: 'Récompenses',
-                            color: const Color(0xFF3B82F6),
-                            onTap: () {},
-                          ),
-                          _buildActionButton(
-                            icon: Icons.history,
-                            label: 'Historique',
-                            color: const Color(0xFF8B5CF6),
-                            onTap: () {},
-                          ),
-                          _buildActionButton(
-                            icon: Icons.star,
-                            label: 'Mes Bonus',
-                            color: const Color(0xFFF59E0B),
-                            onTap: () {},
-                          ),
-                        ],
-                      ),
-                    ],
-                  ),
-                ),
-
-                const SizedBox(height: 22),
-
-                // Notifications
+                // Notifications dynamiques
                 if (_notifications.isNotEmpty) ...[
                   Padding(
                     padding: const EdgeInsets.symmetric(horizontal: 20.0),
@@ -426,62 +493,62 @@ class _HomeScreenState extends State<HomeScreen> {
                 ],
 
                 // Recent Activity
-                Padding(
-                  padding: const EdgeInsets.symmetric(horizontal: 20.0),
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      const Text(
-                        'Activité récente',
-                        style: TextStyle(
-                          fontSize: 16,
-                          fontFamily: "b",
-                          fontWeight: FontWeight.bold,
-                          color: Color(0xFF1F2937),
-                        ),
-                      ),
-                      const SizedBox(height: 16),
-                      Container(
-                        width: double.infinity,
-                        padding: const EdgeInsets.all(20),
-                        decoration: BoxDecoration(
-                          color: Colors.white,
-                          borderRadius: BorderRadius.circular(12),
-                          boxShadow: [
-                            BoxShadow(
-                              color: Colors.black.withOpacity(0.1),
-                              blurRadius: 8,
-                              offset: const Offset(0, 2),
-                            ),
-                          ],
-                        ),
-                        child: const Column(
-                          crossAxisAlignment: CrossAxisAlignment.start,
-                          children: [
-                            Text(
-                              '3 achats ce mois-ci',
-                              style: TextStyle(
-                                fontSize: 14,
-                                fontFamily: "b",
-                                fontWeight: FontWeight.w600,
-                                color: Color(0xFF1F2937),
-                              ),
-                            ),
-                            SizedBox(height: 4),
-                            Text(
-                              'Continuez pour gagner plus de points !',
-                              style: TextStyle(
-                                fontSize: 13,
-                                fontFamily: "r",
-                                color: Color(0xFF6B7280),
-                              ),
-                            ),
-                          ],
-                        ),
-                      ),
-                    ],
-                  ),
-                ),
+                // Padding(
+                //   padding: const EdgeInsets.symmetric(horizontal: 20.0),
+                //   child: Column(
+                //     crossAxisAlignment: CrossAxisAlignment.start,
+                //     children: [
+                //       const Text(
+                //         'Activité récente',
+                //         style: TextStyle(
+                //           fontSize: 16,
+                //           fontFamily: "b",
+                //           fontWeight: FontWeight.bold,
+                //           color: Color(0xFF1F2937),
+                //         ),
+                //       ),
+                //       const SizedBox(height: 16),
+                //       Container(
+                //         width: double.infinity,
+                //         padding: const EdgeInsets.all(20),
+                //         decoration: BoxDecoration(
+                //           color: Colors.white,
+                //           borderRadius: BorderRadius.circular(12),
+                //           boxShadow: [
+                //             BoxShadow(
+                //               color: Colors.black.withOpacity(0.1),
+                //               blurRadius: 8,
+                //               offset: const Offset(0, 2),
+                //             ),
+                //           ],
+                //         ),
+                //         child: const Column(
+                //           crossAxisAlignment: CrossAxisAlignment.start,
+                //           children: [
+                //             Text(
+                //               '3 achats ce mois-ci',
+                //               style: TextStyle(
+                //                 fontSize: 14,
+                //                 fontFamily: "b",
+                //                 fontWeight: FontWeight.w600,
+                //                 color: Color(0xFF1F2937),
+                //               ),
+                //             ),
+                //             SizedBox(height: 4),
+                //             Text(
+                //               'Continuez pour gagner plus de points !',
+                //               style: TextStyle(
+                //                 fontSize: 13,
+                //                 fontFamily: "r",
+                //                 color: Color(0xFF6B7280),
+                //               ),
+                //             ),
+                //           ],
+                //         ),
+                //       ),
+                //     ],
+                //   ),
+                // ),
 
                 const SizedBox(height: 20),
               ],
@@ -534,7 +601,19 @@ class _HomeScreenState extends State<HomeScreen> {
     );
   }
 
-  Widget _buildNotificationCard(Map<String, dynamic> notification) {
+    Widget _buildNotificationCard(Map<String, dynamic> notification) {
+    String dateStr = '';
+    if (notification['created_at'] != null) {
+      final date = DateTime.tryParse(notification['created_at']);
+      if (date != null) {
+        dateStr = '${date.day.toString().padLeft(2, '0')}/'
+                  '${date.month.toString().padLeft(2, '0')}/'
+                  '${date.year} '
+                  '${date.hour.toString().padLeft(2, '0')}:'
+                  '${date.minute.toString().padLeft(2, '0')}';
+      }
+    }
+  
     return Container(
       margin: const EdgeInsets.only(bottom: 8),
       padding: const EdgeInsets.all(16),
@@ -573,12 +652,23 @@ class _HomeScreenState extends State<HomeScreen> {
                     color: Color(0xFF6B7280),
                   ),
                 ),
+                if (dateStr.isNotEmpty) ...[
+                  const SizedBox(height: 4),
+                  Text(
+                    dateStr,
+                    style: const TextStyle(
+                      fontSize: 11,
+                      color: Color(0xFF9CA3AF),
+                    ),
+                  ),
+                ],
               ],
             ),
           ),
           Container(
             width: 8,
             height: 8,
+            margin: const EdgeInsets.only(right: 12),
             decoration: BoxDecoration(
               color: notification['type'] == 'offer'
                   ? const Color(0xFF10B981)
@@ -586,15 +676,36 @@ class _HomeScreenState extends State<HomeScreen> {
               borderRadius: BorderRadius.circular(4),
             ),
           ),
+          // Icône de suppression
+          IconButton(
+            icon: const Icon(Icons.delete, color: Color(0xFFEF4444)),
+            tooltip: "Supprimer",
+                        onPressed: () async {
+              print('Suppression notification id: ${notification['id']}');
+              await _deleteNotification(notification['id'].toString());
+              await _fetchUser();
+                            setState(() {
+                _notifications.removeWhere((n) => n['id'].toString() == notification['id'].toString());
+              });
+            },
+          ),
         ],
       ),
     );
   }
+  
+    Future<void> _deleteNotification(String notificationId) async {
+    final response = await http.post(
+      Uri.parse('$baseUrl/delete_notification.php'),
+      body: {'id': notificationId}, // <-- PAS de headers ici
+    );
+    print('Delete response: ${response.body}');
+  }
 
   /// Retourne le nombre de points restant pour atteindre le prochain palier.
   int _getPointsToNextTier(int userPoints) {
-    if (_user?.rewards != null && _user!.rewards is List) {
-      final rewards = List<Map<String, dynamic>>.from(_user!.rewards as List)
+    if (_user.rewards != null && _user.rewards is List) {
+      final rewards = List<Map<String, dynamic>>.from(_user.rewards as List)
         ..sort((a, b) => int.parse(a['value'].toString()).compareTo(int.parse(b['value'].toString())));
       for (final reward in rewards) {
         final tierValue = int.tryParse(reward['value'].toString()) ?? 0;
@@ -609,9 +720,9 @@ class _HomeScreenState extends State<HomeScreen> {
   }
 
   /// Retourne dynamiquement le niveau actuel selon les points et rewards.
-    String _getCurrentTier(int userPoints) {
-    if (_user?.rewards != null && _user!.rewards is List) {
-      final rewards = List<Map<String, dynamic>>.from(_user!.rewards as List)
+  String _getCurrentTier(int userPoints) {
+    if (_user.rewards != null && _user.rewards is List) {
+      final rewards = List<Map<String, dynamic>>.from(_user.rewards as List)
         ..sort((a, b) => int.parse(a['value'].toString()).compareTo(int.parse(b['value'].toString())));
       if (rewards.isEmpty) {
         return _user?.tier ?? '';
@@ -629,10 +740,11 @@ class _HomeScreenState extends State<HomeScreen> {
     }
     return _user?.tier ?? '';
   }
+
   /// Retourne le pourcentage de progression vers le prochain palier.
   double _getProgressPercentage(int userPoints) {
-    if (_user?.rewards != null && _user!.rewards is List) {
-      final rewards = List<Map<String, dynamic>>.from(_user!.rewards as List)
+    if (_user.rewards != null && _user.rewards is List) {
+      final rewards = List<Map<String, dynamic>>.from(_user.rewards as List)
         ..sort((a, b) => int.parse(a['value'].toString()).compareTo(int.parse(b['value'].toString())));
       int previous = 0;
       for (final reward in rewards) {
@@ -652,8 +764,8 @@ class _HomeScreenState extends State<HomeScreen> {
 
   /// Couleur dynamique selon le niveau (ordre dans rewards ou clé color)
   Color _getTierColor(String tier) {
-    if (_user?.rewards != null && _user!.rewards is List) {
-      final rewards = List<Map<String, dynamic>>.from(_user!.rewards as List);
+    if (_user.rewards != null && _user.rewards is List) {
+      final rewards = List<Map<String, dynamic>>.from(_user.rewards as List);
       final reward = rewards.firstWhere(
         (r) => (r['type']?.toString().toLowerCase() ?? '') == tier.toLowerCase(),
         orElse: () => {},

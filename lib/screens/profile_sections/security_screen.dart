@@ -1,7 +1,12 @@
+import 'dart:convert';
+import 'package:gabon_client_app/const.dart';
+import 'package:gabon_client_app/models/user_model.dart';
+import 'package:http/http.dart' as http;
 import 'package:flutter/material.dart';
 
 class SecurityScreen extends StatefulWidget {
-  const SecurityScreen({super.key});
+  final User user;
+  const SecurityScreen({super.key, required this.user});
 
   @override
   State<SecurityScreen> createState() => _SecurityScreenState();
@@ -16,7 +21,23 @@ class _SecurityScreenState extends State<SecurityScreen> {
   bool _showNewPassword = false;
   bool _showConfirmPassword = false;
   bool _twoFactorEnabled = false;
-
+    bool _isLoading = false;
+ void _showInfoDialog(String title, String content) {
+    showDialog(
+      context: context,
+      builder: (context) => AlertDialog(
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+        title: Text(title, style: const TextStyle(fontWeight: FontWeight.bold, fontFamily: "b")),
+        content: SingleChildScrollView(child: Text(content, style: const TextStyle(fontSize: 14))),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context),
+            child: const Text('Fermer'),
+          ),
+        ],
+      ),
+    );
+  }
   @override
   Widget build(BuildContext context) {
     return Scaffold(
@@ -94,14 +115,23 @@ class _SecurityScreenState extends State<SecurityScreen> {
                           borderRadius: BorderRadius.circular(8),
                         ),
                       ),
-                      child: const Text(
-                        'Changer le mot de passe',
-                        style: TextStyle(
-                          fontSize: 13,
-                      fontFamily: "b",
-                          fontWeight: FontWeight.w600,
-                        ),
-                      ),
+                                            child: _isLoading
+                          ? const SizedBox(
+                              height: 20,
+                              width: 20,
+                              child: CircularProgressIndicator(
+                                color: Colors.white,
+                                strokeWidth: 2,
+                              ),
+                            )
+                          : const Text(
+                              'Changer le mot de passe',
+                              style: TextStyle(
+                                fontSize: 13,
+                                fontFamily: "b",
+                                fontWeight: FontWeight.w600,
+                              ),
+                            ),
                     ),
                   ),
                 ],
@@ -169,14 +199,31 @@ class _SecurityScreenState extends State<SecurityScreen> {
 
             const SizedBox(height: 20),
 
-            // Privacy Section
             _buildSection(
               title: 'Confidentialité',
               child: Column(
                 children: [
-                  _buildPrivacyItem('Politique de confidentialité'),
-                  _buildPrivacyItem('Conditions d\'utilisation'),
-                  _buildPrivacyItem('Gestion des données personnelles'),
+                  _buildPrivacyItem(
+                    'Politique de confidentialité',
+                    onTap: () => _showInfoDialog(
+                      'Politique de confidentialité',
+                      '''Nous nous engageons à protéger vos données personnelles. Toutes les informations collectées sont utilisées uniquement pour améliorer votre expérience et ne sont jamais partagées sans votre consentement. Vous pouvez à tout moment demander la suppression ou la modification de vos données en nous contactant.''',
+                    ),
+                  ),
+                  _buildPrivacyItem(
+                    'Conditions d\'utilisation',
+                    onTap: () => _showInfoDialog(
+                      'Conditions d\'utilisation',
+                      '''En utilisant notre application, vous acceptez de respecter les règles de bonne conduite et d’utiliser les services conformément à la législation en vigueur. Toute utilisation abusive ou frauduleuse entraînera la suspension de votre compte. Pour plus de détails, consultez notre site web.''',
+                    ),
+                  ),
+                  _buildPrivacyItem(
+                    'Protection des données à caractère personnelles',
+                    onTap: () => _showInfoDialog(
+                      'Protection des données à caractère personnelles',
+                      '''Vous disposez d’un droit d’accès, de rectification et de suppression de vos données personnelles. Nous appliquons des mesures de sécurité strictes pour garantir la confidentialité de vos informations. Pour toute demande relative à vos données, contactez notre support.''',
+                    ),
+                  ),
                 ],
               ),
             ),
@@ -209,7 +256,7 @@ class _SecurityScreenState extends State<SecurityScreen> {
             style: const TextStyle(
               fontSize: 14,
               fontWeight: FontWeight.bold,
-                      fontFamily: "b",
+              fontFamily: "b",
               color: Color(0xFF1F2937),
             ),
           ),
@@ -219,6 +266,7 @@ class _SecurityScreenState extends State<SecurityScreen> {
       ),
     );
   }
+
 
   Widget _buildPasswordField({
     required String label,
@@ -272,58 +320,85 @@ fontSize: 13
     );
   }
 
-  Widget _buildPrivacyItem(String title) {
-    return Container(
-      width: double.infinity,
-      padding: const EdgeInsets.symmetric(vertical: 16),
-      decoration: const BoxDecoration(
-        border: Border(
-          bottom: BorderSide(color: Color(0xFFF3F4F6)),
+  Widget _buildPrivacyItem(String title, {VoidCallback? onTap}) {
+    return InkWell(
+      onTap: onTap,
+      child: Container(
+        width: double.infinity,
+        padding: const EdgeInsets.symmetric(vertical: 16),
+        decoration: const BoxDecoration(
+          border: Border(
+            bottom: BorderSide(color: Color(0xFFF3F4F6)),
+          ),
         ),
-      ),
-      child: Text(
-        title,
-        style: const TextStyle(
-          fontSize: 13,
-                      fontFamily: "r",
-          color: Color(0xFF3B82F6),
-          fontWeight: FontWeight.w500,
+        child: Text(
+          title,
+          style: const TextStyle(
+            fontSize: 13,
+            fontFamily: "r",
+            color: Color(0xFF3B82F6),
+            fontWeight: FontWeight.w500,
+          ),
         ),
       ),
     );
   }
 
-  void _handleChangePassword() {
-    if (_currentPasswordController.text.isEmpty ||
-        _newPasswordController.text.isEmpty ||
-        _confirmPasswordController.text.isEmpty) {
-      _showError('Veuillez remplir tous les champs');
-      return;
+        void _handleChangePassword() async {
+      if (_currentPasswordController.text.isEmpty ||
+          _newPasswordController.text.isEmpty ||
+          _confirmPasswordController.text.isEmpty) {
+        _showError('Veuillez remplir tous les champs');
+        return;
+      }
+    
+      if (_newPasswordController.text != _confirmPasswordController.text) {
+        _showError('Les nouveaux mots de passe ne correspondent pas');
+        return;
+      }
+    
+      if (_newPasswordController.text.length < 6) {
+        _showError('Le nouveau mot de passe doit contenir au moins 6 caractères');
+        return;
+      }
+    
+      setState(() {
+        _isLoading = true;
+      });
+    
+      try {
+        final response = await http.post(
+          Uri.parse('$baseUrl/update_password.php'),
+          headers: {'Content-Type': 'application/json'},
+          body: jsonEncode({
+            'id': "${widget.user.id}",
+            'current_password': _currentPasswordController.text.trim(),
+            'new_password': _newPasswordController.text.trim(),
+          }),
+        );
+    
+        final data = jsonDecode(response.body);
+        if (response.statusCode == 200 && data['success'] == true) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(
+              content: Text('Mot de passe modifié avec succès'),
+              backgroundColor: Color(0xFF10B981),
+            ),
+          );
+          _currentPasswordController.clear();
+          _newPasswordController.clear();
+          _confirmPasswordController.clear();
+        } else {
+          _showError(data['error'] ?? 'Erreur lors de la modification');
+        }
+      } catch (e) {
+        _showError('Erreur réseau');
+      }
+    
+      setState(() {
+        _isLoading = false;
+      });
     }
-
-    if (_newPasswordController.text != _confirmPasswordController.text) {
-      _showError('Les nouveaux mots de passe ne correspondent pas');
-      return;
-    }
-
-    if (_newPasswordController.text.length < 6) {
-      _showError('Le nouveau mot de passe doit contenir au moins 6 caractères');
-      return;
-    }
-
-    ScaffoldMessenger.of(context).showSnackBar(
-      const SnackBar(
-        content: Text('Mot de passe modifié avec succès'),
-        backgroundColor: Color(0xFF10B981),
-      ),
-    );
-
-    // Clear fields
-    _currentPasswordController.clear();
-    _newPasswordController.clear();
-    _confirmPasswordController.clear();
-  }
-
   void _showError(String message) {
     ScaffoldMessenger.of(context).showSnackBar(
       SnackBar(

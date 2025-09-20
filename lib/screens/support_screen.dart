@@ -1,5 +1,10 @@
+import 'dart:async';
+import 'dart:convert';
+import 'package:gabon_client_app/const.dart';
+import 'package:gabon_client_app/models/user_model.dart';
+import 'package:http/http.dart' as http;
 import 'package:flutter/material.dart';
-import '../models/user_model.dart';
+import 'package:url_launcher/url_launcher.dart';
 
 class SupportScreen extends StatefulWidget {
   final User user;
@@ -11,32 +16,46 @@ class SupportScreen extends StatefulWidget {
 }
 
 class _SupportScreenState extends State<SupportScreen> {
-  int? _expandedFAQ;
+ int? _expandedFAQ;
   final _messageController = TextEditingController();
+  List<Map<String, String>> _faqData = [];
+  Timer? _faqTimer;
 
-  final List<Map<String, String>> _faqData = [
-    {
-      'question': 'Comment gagner des points de fidélité ?',
-      'answer': 'Vous gagnez des points à chaque achat effectué. En général, 1€ dépensé = 1 point gagné. Des promotions spéciales peuvent vous permettre de gagner des points bonus.',
-    },
-    {
-      'question': 'Quand mes points expirent-ils ?',
-      'answer': 'Vos points sont valables 12 mois à partir de la date d\'acquisition. Vous recevrez une notification avant l\'expiration.',
-    },
-    {
-      'question': 'Comment échanger mes points ?',
-      'answer': 'Rendez-vous dans l\'onglet "Récompenses" pour voir toutes les récompenses disponibles. Sélectionnez celle qui vous intéresse et suivez les instructions.',
-    },
-    {
-      'question': 'Comment modifier mes informations personnelles ?',
-      'answer': 'Allez dans l\'onglet "Profil" et appuyez sur "Modifier le profil". Vous pourrez y changer vos informations personnelles.',
-    },
-    {
-      'question': 'Puis-je transférer mes points à quelqu\'un d\'autre ?',
-      'answer': 'Non, les points de fidélité sont personnels et ne peuvent pas être transférés à un autre compte.',
-    },
-  ];
+  @override
+  void initState() {
+    super.initState();
+    fetchFAQ();
+    _faqTimer = Timer.periodic(const Duration(seconds: 1), (timer) {
+      fetchFAQ();
+    });
+  }
 
+  @override
+  void dispose() {
+    _faqTimer?.cancel();
+    super.dispose();
+  }
+
+  Future<void> fetchFAQ() async {
+    try {
+      final response = await http.get(Uri.parse('$baseUrl/get_faq.php'));
+      if (response.statusCode == 200) {
+        final data = jsonDecode(response.body);
+        if (data['success'] == true && data['faqs'] != null) {
+          setState(() {
+            _faqData = (data['faqs'] as List)
+                .map<Map<String, String>>((item) => {
+                      'question': item['question']?.toString() ?? '',
+                      'answer': item['answer']?.toString() ?? '',
+                    })
+                .toList();
+          });
+        }
+      }
+    } catch (e) {
+      print('Erreur FAQ: $e');
+    }
+  }
   @override
   Widget build(BuildContext context) {
     return Scaffold(
@@ -77,11 +96,22 @@ class _SupportScreenState extends State<SupportScreen> {
                     ),
                     const SizedBox(height: 16),
                     
-                    _buildContactOption(
+                                        _buildContactOption(
                       icon: Icons.chat,
-                      title: 'Chat en direct',
+                      title: 'Contactez-nous sur Whatsapp',
                       subtitle: 'Disponible 9h-18h',
                       color: const Color(0xFF3B82F6),
+                      onTap: () async {
+                        final phone = '+24162049675';
+                        final url = 'https://wa.me/${phone.replaceAll('+', '')}';
+                        if (await canLaunchUrl(Uri.parse(url))) {
+                          await launchUrl(Uri.parse(url), mode: LaunchMode.externalApplication);
+                        } else {
+                          ScaffoldMessenger.of(context).showSnackBar(
+                            const SnackBar(content: Text('Impossible d’ouvrir WhatsApp')),
+                          );
+                        }
+                      },
                     ),
                     
                     _buildContactOption(
@@ -104,7 +134,7 @@ class _SupportScreenState extends State<SupportScreen> {
               const SizedBox(height: 32),
 
               // FAQ Section
-              Padding(
+                            Padding(
                 padding: const EdgeInsets.symmetric(horizontal: 20.0),
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
@@ -118,97 +148,98 @@ class _SupportScreenState extends State<SupportScreen> {
                       ),
                     ),
                     const SizedBox(height: 16),
-                    
-                    ..._faqData.asMap().entries.map((entry) {
-                      final index = entry.key;
-                      final faq = entry.value;
-                      return _buildFAQItem(index, faq);
-                    }),
+                                        ..._faqData.isEmpty
+                      ? [const Text("Aucune question pour le moment.", style: TextStyle(color: Colors.grey))]
+                      : _faqData.asMap().entries.map((entry) {
+                          final index = entry.key;
+                          final faq = entry.value;
+                          return _buildFAQItem(index, faq);
+                        }),
                   ],
                 ),
               ),
 
               const SizedBox(height: 22),
 
-              // Contact form
-              Padding(
-                padding: const EdgeInsets.symmetric(horizontal: 20.0),
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    const Text(
-                      'Envoyez-nous un message',
-                      style: TextStyle(
-                        fontSize: 14,
-                      fontFamily: "b",
-                        fontWeight: FontWeight.bold,
-                        color: Color(0xFF1F2937),
-                      ),
-                    ),
-                    const SizedBox(height: 16),
+              // // Contact form
+              // Padding(
+              //   padding: const EdgeInsets.symmetric(horizontal: 20.0),
+              //   child: Column(
+              //     crossAxisAlignment: CrossAxisAlignment.start,
+              //     children: [
+              //       const Text(
+              //         'Envoyez-nous un message',
+              //         style: TextStyle(
+              //           fontSize: 14,
+              //         fontFamily: "b",
+              //           fontWeight: FontWeight.bold,
+              //           color: Color(0xFF1F2937),
+              //         ),
+              //       ),
+              //       const SizedBox(height: 16),
                     
-                    Container(
-                      padding: const EdgeInsets.all(16),
-                      decoration: BoxDecoration(
-                        color: Colors.white,
-                        borderRadius: BorderRadius.circular(12),
-                        boxShadow: [
-                          BoxShadow(
-                            color: Colors.black.withOpacity(0.1),
-                            blurRadius: 8,
-                            offset: const Offset(0, 2),
-                          ),
-                        ],
-                      ),
-                      child: Column(
-                        children: [
-                          TextField(
-                            controller: _messageController,
-                            maxLines: 4,
-                            decoration: const InputDecoration(
-                              hintText: 'Décrivez votre problème ou votre question...',
-                              border: OutlineInputBorder(),
-                              hintStyle: TextStyle(color: Color(0xFF9CA3AF),fontSize: 13),
-                            ),
-                          ),
-                          const SizedBox(height: 16),
-                          SizedBox(
-                            width: double.infinity,
-                            child: ElevatedButton(
-                              onPressed: _messageController.text.trim().isNotEmpty 
-                                  ? _sendMessage 
-                                  : null,
-                              style: ElevatedButton.styleFrom(
-                                backgroundColor: const Color(0xFF3B82F6),
-                                foregroundColor: Colors.white,
-                                padding: const EdgeInsets.symmetric(vertical: 12),
-                                shape: RoundedRectangleBorder(
-                                  borderRadius: BorderRadius.circular(8),
-                                ),
-                              ),
-                              child: const Row(
-                                mainAxisAlignment: MainAxisAlignment.center,
-                                children: [
-                                  Icon(Icons.send, size: 20),
-                                  SizedBox(width: 8),
-                                  Text(
-                                    'Envoyer',
-                                    style: TextStyle(
-                                      fontSize: 14,
-                      fontFamily: "b",
-                                      fontWeight: FontWeight.w600,
-                                    ),
-                                  ),
-                                ],
-                              ),
-                            ),
-                          ),
-                        ],
-                      ),
-                    ),
-                  ],
-                ),
-              ),
+              //       Container(
+              //         padding: const EdgeInsets.all(16),
+              //         decoration: BoxDecoration(
+              //           color: Colors.white,
+              //           borderRadius: BorderRadius.circular(12),
+              //           boxShadow: [
+              //             BoxShadow(
+              //               color: Colors.black.withOpacity(0.1),
+              //               blurRadius: 8,
+              //               offset: const Offset(0, 2),
+              //             ),
+              //           ],
+              //         ),
+              //         child: Column(
+              //           children: [
+              //             TextField(
+              //               controller: _messageController,
+              //               maxLines: 4,
+              //               decoration: const InputDecoration(
+              //                 hintText: 'Décrivez votre problème ou votre question...',
+              //                 border: OutlineInputBorder(),
+              //                 hintStyle: TextStyle(color: Color(0xFF9CA3AF),fontSize: 13),
+              //               ),
+              //             ),
+              //             const SizedBox(height: 16),
+              //             SizedBox(
+              //               width: double.infinity,
+              //               child: ElevatedButton(
+              //                 onPressed: _messageController.text.trim().isNotEmpty 
+              //                     ? _sendMessage 
+              //                     : null,
+              //                 style: ElevatedButton.styleFrom(
+              //                   backgroundColor: const Color(0xFF3B82F6),
+              //                   foregroundColor: Colors.white,
+              //                   padding: const EdgeInsets.symmetric(vertical: 12),
+              //                   shape: RoundedRectangleBorder(
+              //                     borderRadius: BorderRadius.circular(8),
+              //                   ),
+              //                 ),
+              //                 child: const Row(
+              //                   mainAxisAlignment: MainAxisAlignment.center,
+              //                   children: [
+              //                     Icon(Icons.send, size: 20),
+              //                     SizedBox(width: 8),
+              //                     Text(
+              //                       'Envoyer',
+              //                       style: TextStyle(
+              //                         fontSize: 14,
+              //         fontFamily: "b",
+              //                         fontWeight: FontWeight.w600,
+              //                       ),
+              //                     ),
+              //                   ],
+              //                 ),
+              //               ),
+              //             ),
+              //           ],
+              //         ),
+              //       ),
+              //     ],
+              //   ),
+              // ),
 
               const SizedBox(height: 20),
             ],
@@ -218,11 +249,12 @@ class _SupportScreenState extends State<SupportScreen> {
     );
   }
 
-  Widget _buildContactOption({
+    Widget _buildContactOption({
     required IconData icon,
     required String title,
     required String subtitle,
     required Color color,
+    VoidCallback? onTap,
   }) {
     return Container(
       margin: const EdgeInsets.only(bottom: 8),
@@ -251,7 +283,7 @@ class _SupportScreenState extends State<SupportScreen> {
           title,
           style: const TextStyle(
             fontSize: 13,
-                      fontFamily: "b",
+            fontFamily: "b",
             fontWeight: FontWeight.w600,
             color: Color(0xFF1F2937),
           ),
@@ -260,16 +292,37 @@ class _SupportScreenState extends State<SupportScreen> {
           subtitle,
           style: const TextStyle(
             fontSize: 14,
-                      fontFamily: "r",
+            fontFamily: "r",
             color: Color(0xFF6B7280),
           ),
         ),
         trailing: const Icon(Icons.chevron_right, color: Color(0xFF9CA3AF)),
-        onTap: () {},
+        onTap: onTap ??
+            () async {
+              if (title.toLowerCase().contains('téléphone')) {
+                final tel = subtitle.replaceAll(' ', '');
+                final url = 'tel:$tel';
+                if (await canLaunchUrl(Uri.parse(url))) {
+                  await launchUrl(Uri.parse(url), mode: LaunchMode.externalApplication);
+                } else {
+                  ScaffoldMessenger.of(context).showSnackBar(
+                    const SnackBar(content: Text('Impossible d’ouvrir l’application téléphone')),
+                  );
+                }
+              } else if (title.toLowerCase().contains('email')) {
+                final url = 'mailto:$subtitle';
+                if (await canLaunchUrl(Uri.parse(url))) {
+                  await launchUrl(Uri.parse(url), mode: LaunchMode.externalApplication);
+                } else {
+                  ScaffoldMessenger.of(context).showSnackBar(
+                    const SnackBar(content: Text('Impossible d’ouvrir l’application email')),
+                  );
+                }
+              }
+            },
       ),
     );
   }
-
   Widget _buildFAQItem(int index, Map<String, String> faq) {
     final isExpanded = _expandedFAQ == index;
     
